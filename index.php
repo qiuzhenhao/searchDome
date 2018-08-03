@@ -4,7 +4,6 @@
     session_start();
 
     if($_SESSION['amount'] == null || $_SESSION['way'] == null || $_SESSION['date'] == null){
-
         $user = "root";
         //$pass = "";
         $pass = "123456";
@@ -25,10 +24,8 @@
         foreach ($rsWay as $key => $value){
             $rsWay[$key]['check'] = false;
         }
-
-        $reWayIson = json_encode($rsWay);
-
-        $_SESSION['way'] = $reWayIson;
+        $reWayJson = json_encode($rsWay);
+        $_SESSION['way'] = $reWayJson;
 
         //由日期和渠道获取数量，储存为二维数组， [日期][渠道]
         foreach ($rsDate as $keyDate=>$valueDate){
@@ -43,9 +40,10 @@
             }
             $reByAll[$valueDate['time']] = $reByWay;
         }
-        $_SESSION['amount'] = $reByAll;
-
+        $reAmountJson = json_encode($reByAll);
+        $_SESSION['amount'] = $reAmountJson;
     }
+
     //表格纵列
     $tableHead = [];
     $num = 0;
@@ -60,14 +58,12 @@
         }else{
             $num = $num - 51;
             $ch = 'B'.chr(ord('A')+$num);
-
         }
         $tableHead[] = $ch;
     }
     $_SESSION['tableHead'] = $tableHead;
-
-
 ?>
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -120,42 +116,44 @@
         overflow: auto;
         margin-bottom:20px;
     }
+    .selectPage{
+        margin-left: 17%;
+        margin-top:2%;
+        margin-bottom: 5%;
+    }
+    .selectPage .top{
+        width: 80%;
+        height: 80px;
+        text-align: center;
+    }
+    .selectPage .top button{
+        float:right;
+        margin-top:30px;
+        margin-right:50px;
+    }
+    .selectPage .tableSetSelect{
+        margin-top: 15px;
+    }
+    .selectPage .tableSetSelect tr td{
+        word-break: keep-all;
+        white-space:nowrap;
+        padding: 0px 8px 0px 8px;
+        height: 70px;
+        text-align: center;
+    }
+    #boxscrol2 {
+        width: 1250px;
+        height: 850px;
+        overflow: auto;
+        margin-bottom:20px;
+    }
+    table td{
+
+    }
 </style>
 <body>
     <div id="vueApp">
-<!--        <form action="search.php" method="post">-->
-<!--            -->
-<!--            <select name="name">-->
-<!--                <option value ="-1">渠道选择</option>-->
-<!--                --><?php
-//                    foreach ($_SESSION['way'] as $row) {
-//                        if($row['name'] == null || $row['name'] == ""){
-//                            $row['name'] = "无";
-//                        }
-//                ?>
-<!--                 <option value ="--><?php //echo $row['name']; ?><!--">--><?php //echo $row['name'];?><!--</option>-->
-<!--                --><?php
-//                    }
-//                ?>
-<!--            </select>-->
-<!---->
-<!--            <select name="time">-->
-<!--                <option value ="-1">日期选择</option>-->
-<!--                --><?php
-//                foreach ($_SESSION['date'] as $row) {
-//                    if($row['time'] == null || $row['time'] == ""){
-//                        $row['time'] = "无";
-//                    }
-//                    ?>
-<!--                    <option value ="--><?php //echo $row['time']; ?><!--">--><?php //echo $row['time'];?><!--</option>-->
-<!--                    --><?php
-//                }
-//                ?>
-<!--            </select>-->
-<!--                 <input type="submit"  class="am-btn am-btn-primary am-round" value="查询">-->
-<!--        </form>-->
-
-        <div class="content">
+        <div class="content" v-if="statu == 1">
             <div class="am-g">
                 <div class="am-u-sm-5">
                     <button
@@ -170,7 +168,7 @@
                 <div class="am-u-sm-4">
                     <div class="am-g">
                         <div class="am-u-sm-6">
-                            <button type="button" class="am-btn am-btn-warning am-margin-right" id="my-start">开始日期</button><span id="my-startDate">2018-7-11</span>
+                            <button type="button" class="am-btn am-btn-warning am-margin-right" id="my-start">开始日期</button><span id="my-startDate">2018-7-10</span>
                         </div>
                         <div class="am-u-sm-6">
                             <button type="button" class="am-btn am-btn-warning am-margin-right" id="my-end">结束日期</button><span id="my-endDate"><?php echo date("Y-m-d")?></span>
@@ -187,16 +185,30 @@
                         </td>
                         <td>渠道</td>
                     </tr>
-                        <tr v-for="(key,value) in wayList">
-                            <td style="width: 50px"><input type="checkbox" id="{{key}}" v-model="value.check" style="zoom:130%;"></td>
-                            <td ><span v-text="value.name ==''?'无':value.name"></span></td>
-                        </tr>
+                    <tr v-for="(key,value) in wayList">
+                        <td style="width: 50px"><input type="checkbox" id="{{key}}" v-model="value.check" style="zoom:130%;"></td>
+                        <td ><span v-text="value.name ==''?'无':value.name"></span></td>
+                    </tr>
                 </table>
             </div>
-
         </div>
-        
-
+        <div class="selectPage" v-if="statu == 2">
+            <div class="top">
+                <span style="font-size: 50px; color:#87CEEB">查询结果</span>
+                <button type="button" class="am-btn am-btn-secondary am-round" @click="backList()">返回列表</button>
+            </div>
+            <div id="boxscrol2">
+                <table class="tableSetSelect" border="1" cellspacing="0">
+                    <tr>
+                        <td>日期</td>
+                        <td v-for="way in needSelectWay" v-text="way == ''?'无':way"></td>
+                    </tr>
+                    <tr v-for="time in showList">
+                        <td v-for="amount in time" v-text="amount"></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
     </div>
     <!--   弹出窗 -->
     <div class="am-modal am-modal-no-btn" tabindex="-1" id="export">
@@ -307,12 +319,13 @@
         }
         //滚动条
         $(document).ready(function() {
-            $("#boxscrol").niceScroll("#boxscroll4 .tableSet",{boxzoom:true}); // First scrollable DIV
+            $("#boxscrol").niceScroll("#boxscrol .tableSet",{boxzoom:true}); // First scrollable DIV
+            $("#boxscrol2").niceScroll();
         });
-        //时间组件    startDate起始时间，默认为2018.7.11   endDate结束时间，默认到现在
+        //时间组件    startDate起始时间，默认为2018.7.10   endDate结束时间，默认到现在
         $(function() {
             var nowTemp = new Date();
-            var startDate = new Date(2018, 6, 11);
+            var startDate = new Date(2018, 6, 10);
             var endDate = new Date(nowTemp.getFullYear(), nowTemp.getMonth(), nowTemp.getDate());
             var nowDay = new Date(nowTemp.getFullYear(), nowTemp.getMonth(), nowTemp.getDate(), 0, 0, 0, 0).valueOf();
             var nowMoth = new Date(nowTemp.getFullYear(), nowTemp.getMonth(), 1, 0, 0, 0, 0).valueOf();
@@ -377,8 +390,18 @@
             data: {
                 //全选
                 ischeckAll:false,
+                //时间和渠道获取数量列表
+                amountList:[],
+                //判断是哪个界面 1列表界面  2查询界面
+                statu:1,
                 //渠道列表
                 wayList:[],
+                //需要查询的渠道
+                needSelectWay:[],
+                //查询时间列表
+                timeList:[],
+                //查询展示列表
+                showList:[],
             },
             created: function(){
                 this.getList();
@@ -386,7 +409,10 @@
             methods: {
                 //获取列表
                 getList: function(){
-                    this.wayList = <?php echo $_SESSION['way']?>
+                    this.wayList = <?php echo $_SESSION['way']?>;
+                    this.amountList = <?php echo $_SESSION['amount']?>;
+                    console.log(this.amountList);
+                    this.statu = 1;
                 },
                 //全选或者反选
                 checkAll:function () {
@@ -400,16 +426,82 @@
                     var amount = 0;
                     for(var i = 0; i < this.wayList.length; i++){
                         if(this.wayList[i].check){
+                            this.needSelectWay.push(this.wayList[i].name)
                             amount++;
                         }
                     }
+                    console.log(this.needSelectWay);
                     if(amount == 0){
-                        alert("请先选择渠道");
+                        alert("请先选择渠道"); return;
                     }
+                    this.showList = [];
                     //获取起始时间和结束时间
                     var startTime = $("#my-startDate").text();
-                    var endTime = document.getElementById("my-endDate").innerText;
-                    console.log(startTime);
+                    var endTime = $("#my-endDate").text();
+                    this.timeList = this.getDayAll(startTime, endTime);
+                    this.dealShowList();
+//                    console.log( this.timeList);
+                    this.statu = 2;
+                },
+                //分解时间
+                getDayAll:function (startTime, endTime) {
+                    var dateAllArr = new Array();
+                    var ab = startTime.split("-");
+                    var ae = endTime.split("-");
+                    var db = new Date();
+                    db.setUTCFullYear(ab[0], ab[1]-1, ab[2]);
+                    var de = new Date();
+                    de.setUTCFullYear(ae[0], ae[1]-1, ae[2]);
+                    var unixDb=db.getTime();
+                    var unixDe=de.getTime();
+                    for(var k=unixDb;k<=unixDe;){
+                        var date = new Date(k);
+                        var Y = date.getFullYear() + '-';
+                        var M = (date.getMonth()+1 < 10 ? '0'+(date.getMonth()+1) : date.getMonth()+1) + '-';
+                        var D = date.getDate();
+                        dateAllArr.push((Y+M+D).toString());
+                        k=k+24*60*60*1000;
+                    }
+                    return dateAllArr;
+                },
+                //返回列表
+                backList:function () {
+                    this.statu = 1;
+                    this.ischeckAll = false;
+                    for(var i = 0; i < this.wayList.length; i++){
+                        this.wayList[i].check = this.ischeckAll
+                    }
+                    this.needSelectWay = [];
+                },
+                //处理时间和渠道列表的显示数组
+                dealShowList:function () {
+                    for(var i = 0; i < this.timeList.length; i ++){
+                        var item = [];
+                        //如果查询的时间数据库中不存在的话数据就全部赋0， 否则将数据库的中数量读出
+                        var statuForTime = 0;
+                        item.push(this.timeList[i]);
+                        for(var key in this.amountList){
+                            if(key == this.timeList[i]){
+                                statuForTime ++ ;
+                            }
+                        }
+                        if(statuForTime != 0){
+                            for(var j = 0; j < this.needSelectWay.length; j ++){
+                                item.push(this.amountList[this.timeList[i]][this.needSelectWay[j]]);
+                            }
+                        }else{
+                            for(var j = 0; j < this.needSelectWay.length; j ++){
+                                item.push(0);
+                            }
+                        }
+                        this.showList.push(item);
+                    }
+                }
+            },
+            watch: {
+                'statu':function () {
+                    $('#my-start').datepicker();
+                    $('#my-end').datepicker();
                 }
             }
         })
