@@ -9,9 +9,15 @@
 //    }
 
     session_start();
-	$way = $_GET['way'];        //渠道
-	$time = $_GET['time'];      //日期
-    $statu = $_GET['statu'];    //1:导出全部    2:按时间导出    3:按渠道导出
+    $statu = $_GET['statu'];        //公共参数  $statu = 1全部导出   $statu = 2按需导出
+    $needWay = json_decode($_COOKIE['needWay']);
+    //判断展示行数
+    $listNum = $_COOKIE['listNum'];
+    //展示数据
+    $showList = [];
+    for($i = 0; $i < $listNum; $i ++){
+        $showList[] = json_decode($_COOKIE['showList'.$i]);
+    }
 
     require_once dirname(__FILE__) . '/PHPExcel/Classes/PHPExcel.php';
     $objPHPExcel = new PHPExcel();
@@ -30,50 +36,43 @@
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value['name']);
         }
         //内容
-        $lineNum = 2;   //定位行
+        $rowPosition = 2;   //定位行
         foreach ($_SESSION['amount'] as $k => $v){
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A'.$lineNum, $k);
+            $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A'.$rowPosition, $k);
             $amountPosition = 0;    //定位列
             foreach ($v as $k_amount => $v_amount){
 
-                $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$amountPosition].$lineNum, $v_amount);
+                $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$amountPosition].$rowPosition, $v_amount);
                 $amountPosition ++;
             }
-            $lineNum ++;
+            $rowPosition ++;
         }
 
     }else if($statu == 2){
-        $title = "按时间导出详情";
+        $title = "按需导出详情";
         //表头
         $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
-        $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A2', $time);
-        foreach ($_SESSION['way'] as $key => $value){
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
-            if($value['name'] == ""){
-                $value['name'] = "无";
+        foreach ($needWay as $key => $value){
+            if($value == ""){
+                $value = "无";
             }
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value['name']);
+            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value);
         }
+
         //内容
-        $amountPosition = 0;    //定位列
-        foreach ($_SESSION['amount'][$time] as $k_amount => $v_amount){
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$amountPosition].'2', $v_amount);
-            $amountPosition ++;
-        }
-    }else{
-        $title = "按渠道导出详情";
-        if($way == "无"){
-            $way = "";
-        }
-        //表头
-        $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
-        $objPHPExcel->setActiveSheetIndex(0)->setCellValue('B1', $way);
-        //内容
-        $lineNum = 2;
-        foreach ($_SESSION['date'] as $key => $value){
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A'.$lineNum, $value['time']);
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue('B'.$lineNum, $_SESSION['amount'][$value['time']][$way]);
-            $lineNum ++;
+        $rowPosition = 2;    //定位行
+        foreach ($showList as $key=>$value){
+            foreach ($value as $k_c =>$v_c){
+                $num = 0;
+                if($k_c == 0){
+                    $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A'.$rowPosition, $v_c);
+                }else{
+                    $num = (int)$k_c - 1;
+
+                    $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$num].$rowPosition, $v_c);
+                }
+            }
+            $rowPosition ++;
         }
     }
 

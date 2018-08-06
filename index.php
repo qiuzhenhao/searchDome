@@ -17,22 +17,22 @@
         $date->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
         $rsDate = $date->fetchAll();
         $_SESSION['date'] = $rsDate;
-        //获取渠道,并设置session
+        //获取渠道,并设置session,json数据用于VUE赋值，用于页面展示
         $way = $dbh->query($sqlName);
         $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
         $rsWay = $way->fetchAll();
         foreach ($rsWay as $key => $value){
             $rsWay[$key]['check'] = false;
         }
+        $_SESSION['way'] = $rsWay;
         $reWayJson = json_encode($rsWay);
-        $_SESSION['way'] = $reWayJson;
+        $_SESSION['jsonWay'] = $reWayJson;
 
         //由日期和渠道获取数量，储存为二维数组， [日期][渠道]
         foreach ($rsDate as $keyDate=>$valueDate){
             foreach ($rsWay as $keyWay=>$valueWay){
                 $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}' 
                     and  date_format(created,'%Y-%m-%d') = '{$valueDate['time']}'";
-
                 $amount = $dbh->query($sql);
                 $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
                 $rsAmount = $amount->fetchAll();
@@ -40,8 +40,9 @@
             }
             $reByAll[$valueDate['time']] = $reByWay;
         }
+        $_SESSION['amount'] = $reByAll;
         $reAmountJson = json_encode($reByAll);
-        $_SESSION['amount'] = $reAmountJson;
+        $_SESSION['jsonAmount'] = $reAmountJson;
     }
 
     //表格纵列
@@ -77,7 +78,7 @@
     select{
         margin-right: 20px;
     }
-    input,button{
+    .content input,button{
         width:100px;
         margin-right: 20px;
     }
@@ -89,9 +90,6 @@
         width:100%;
         background-color: white;
     }
-    /*.centent{*/
-        /*padding-top: 50px;*/
-    /*}*/
     .content{
         margin-left: 20%;
         margin-top:2%;
@@ -126,10 +124,10 @@
         height: 80px;
         text-align: center;
     }
-    .selectPage .top button{
+    .selectPage .top .am-btn-group{
         float:right;
         margin-top:30px;
-        margin-right:50px;
+        margin-right:30px;
     }
     .selectPage .tableSetSelect{
         margin-top: 15px;
@@ -147,21 +145,14 @@
         overflow: auto;
         margin-bottom:20px;
     }
-    table td{
 
-    }
 </style>
 <body>
     <div id="vueApp">
         <div class="content" v-if="statu == 1">
             <div class="am-g">
                 <div class="am-u-sm-5">
-                    <button
-                            type="button"
-                            class="am-btn am-btn-success "
-                            data-am-modal="{target: '#export', closeViaDimmer: 0, width: 450, height: 200}">
-                        导出
-                    </button>
+                    <button type="button" class="am-btn am-btn-success" value="全部导出" @click="exportAll()">全部导出</button>
                     <button type="button" class="am-btn am-btn-secondary  "value="查询"  @click="select()">查询</button>
                 </div>
 
@@ -195,7 +186,11 @@
         <div class="selectPage" v-if="statu == 2">
             <div class="top">
                 <span style="font-size: 50px; color:#87CEEB">查询结果</span>
-                <button type="button" class="am-btn am-btn-secondary am-round" @click="backList()">返回列表</button>
+                <div class="am-btn-group" data-am-button>
+                    <button type="button" class="am-btn am-btn-secondary" @click="backList()">返回列表</button>
+                    <button type="button" class="am-btn am-btn-success"value="按需导出"  @click="exportPart()">按需导出</button>
+                </div>
+
             </div>
             <div id="boxscrol2">
                 <table class="tableSetSelect" border="1" cellspacing="0">
@@ -211,115 +206,116 @@
         </div>
     </div>
     <!--   弹出窗 -->
-    <div class="am-modal am-modal-no-btn" tabindex="-1" id="export">
-        <div class="am-modal-dialog">
-            <div class="am-modal-hd">导出选择
-                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>
-            </div>
-            <div class="am-modal-bd">
-                <div class="buttonGroup">
-                    <button type="button" class="am-btn am-btn-success am-round" onclick="exportAll()">导出全部</button>
-                    <button type="button" class="am-btn am-btn-secondary am-round" onclick="exportByTime()">按日期导出</button>
-                    <button type="button" class="am-btn am-btn-primary am-round" onclick="exportByWay()">按渠道导出</button>
-                </div>
-            </div>
-
-        </div>
-    </div>
-    <!--   根据日期导出弹出窗 -->
-    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByTime">
-        <div class="am-modal-dialog" style="width:450px; height: 200px">
-            <div class="am-modal-hd">根据日期导出
-                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>
-            </div>
-            <div class="am-modal-bd">
-                <div class="centent">
-                    <select name="time" id="selectTimeValue">
-                        <option value ="-1">日期选择</option>
-                        <?php
-                        foreach ($_SESSION['date'] as $row) {
-                            if($row['time'] == null || $row['time'] == ""){
-                                $row['time'] = "无";
-                            }
-                            ?>
-                            <option value ="<?php echo $row['time']; ?>"><?php echo $row['time'];?></option>
-                            <?php
-                        }
-                        ?>
-                    </select>
-                    <button type="button" class="am-btn am-btn-success am-btn-sm" onclick="exportByTimeConfirm()">确定</button>
-                </div>
-
-            </div>
-        </div>
-    </div>
-    <!--   根据渠道导出弹出窗 -->
-    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByWay">
-        <div class="am-modal-dialog" style="width:450px; height: 200px">
-            <div class="am-modal-hd">根据渠道导出
-                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>
-            </div>
-            <div class="am-modal-bd">
-                <div class="centent">
-                    <select name="name" id="selectWayValue"">
-                        <option value ="-1">渠道选择</option>
-                        <?php
-                        foreach ($_SESSION['way'] as $row) {
-                            if($row['name'] == null || $row['name'] == ""){
-                                $row['name'] = "无";
-                            }
-                            ?>
-                            <option value ="<?php echo $row['name']; ?>"><?php echo $row['name'];?></option>
-                            <?php
-                        }
-                        ?>
-                    </select>
-                    <button type="button" class="am-btn am-btn-primary am-btn-sm" onclick="exportByWayConfirm()">确定</button>
-                </div>
-
-            </div>
-        </div>
-    </div>
+<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="export">-->
+<!--        <div class="am-modal-dialog">-->
+<!--            <div class="am-modal-hd">导出选择-->
+<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
+<!--            </div>-->
+<!--            <div class="am-modal-bd">-->
+<!--                <div class="buttonGroup">-->
+<!--                    <button type="button" class="am-btn am-btn-success am-round" onclick="exportAll()">导出全部</button>-->
+<!--                    <button type="button" class="am-btn am-btn-secondary am-round" onclick="exportByTime()">按日期导出</button>-->
+<!--                    <button type="button" class="am-btn am-btn-primary am-round" onclick="exportByWay()">按渠道导出</button>-->
+<!--                </div>-->
+<!--            </div>-->
+<!---->
+<!--        </div>-->
+<!--    </div>-->
+<!--    <!--   根据日期导出弹出窗 -->-->
+<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByTime">-->
+<!--        <div class="am-modal-dialog" style="width:450px; height: 200px">-->
+<!--            <div class="am-modal-hd">根据日期导出-->
+<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
+<!--            </div>-->
+<!--            <div class="am-modal-bd">-->
+<!--                <div class="centent">-->
+<!--                    <select name="time" id="selectTimeValue">-->
+<!--                        <option value ="-1">日期选择</option>-->
+<!--                        --><?php
+//                        foreach ($_SESSION['date'] as $row) {
+//                            if($row['time'] == null || $row['time'] == ""){
+//                                $row['time'] = "无";
+//                            }
+//                            ?>
+<!--                            <option value ="--><?php //echo $row['time']; ?><!--">--><?php //echo $row['time'];?><!--</option>-->
+<!--                            --><?php
+//                        }
+//                        ?>
+<!--                    </select>-->
+<!--                    <button type="button" class="am-btn am-btn-success am-btn-sm" onclick="exportByTimeConfirm()">确定</button>-->
+<!--                </div>-->
+<!---->
+<!--            </div>-->
+<!--        </div>-->
+<!--    </div>-->
+<!--    <!--   根据渠道导出弹出窗 -->-->
+<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByWay">-->
+<!--        <div class="am-modal-dialog" style="width:450px; height: 200px">-->
+<!--            <div class="am-modal-hd">根据渠道导出-->
+<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
+<!--            </div>-->
+<!--            <div class="am-modal-bd">-->
+<!--                <div class="centent">-->
+<!--                    <select name="name" id="selectWayValue"">-->
+<!--                        <option value ="-1">渠道选择</option>-->
+<!--                        --><?php
+//                        foreach ($_SESSION['way'] as $row) {
+//                            if($row['name'] == null || $row['name'] == ""){
+//                                $row['name'] = "无";
+//                            }
+//                            ?>
+<!--                            <option value ="--><?php //echo $row['name']; ?><!--">--><?php //echo $row['name'];?><!--</option>-->
+<!--                            --><?php
+//                        }
+//                        ?>
+<!--                    </select>-->
+<!--                    <button type="button" class="am-btn am-btn-primary am-btn-sm" onclick="exportByWayConfirm()">确定</button>-->
+<!--                </div>-->
+<!---->
+<!--            </div>-->
+<!--        </div>-->
+<!--    </div>-->
     <script src="jquery.min.js"></script>
     <script src="amazeui.min.js"></script>
     <script src="jquery.nicescroll.min.js"></script>
     <script src="vue/vue.min.js"></script>
     <script src="vue/vue-resource.min.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script type="text/javascript">
-        //statu = 1 导出全部    statu = 2 按时间导出    statu = 3 按渠道导出
-        function exportAll() {
-            window.location = "export.php?statu=1";
-            $('#export').modal('close');
-        }
-        function exportByTime() {
-            $('#export').modal('close');
-            $('#exportByTime').modal('open');
-        }
-        function exportByWay() {
-            $('#export').modal('close');
-            $('#exportByWay').modal('open');
-        }
-        function exportByTimeConfirm() {
-            var time = $('#selectTimeValue option:selected') .val();//选中的值
-            if(time == "-1"){
-                alert("请先选择时间！！！");
-                return;
-            }
-            window.location = "export.php?statu=2&time="+time;
-            $('#exportByTime').modal('close');
-        }
-        function exportByWayConfirm() {
-            var way = $('#selectWayValue option:selected') .val();//选中的值
-            if(way == "-1"){
-                alert("请先选择渠道！！！");
-                return;
-            }
-            window.location = "export.php?statu=3&way="+way;
-            $('#exportByWay').modal('close');
-        }
+//        //statu = 1 导出全部    statu = 2 按时间导出    statu = 3 按渠道导出
+//        function exportAll() {
+//            window.location = "export.php?statu=1";
+//            $('#export').modal('close');
+//        }
+//        function exportByTime() {
+//            $('#export').modal('close');
+//            $('#exportByTime').modal('open');
+//        }
+//        function exportByWay() {
+//            $('#export').modal('close');
+//            $('#exportByWay').modal('open');
+//        }
+//        function exportByTimeConfirm() {
+//            var time = $('#selectTimeValue option:selected') .val();//选中的值
+//            if(time == "-1"){
+//                alert("请先选择时间！！！");
+//                return;
+//            }
+//            window.location = "export.php?statu=2&time="+time;
+//            $('#exportByTime').modal('close');
+//        }
+//        function exportByWayConfirm() {
+//            var way = $('#selectWayValue option:selected') .val();//选中的值
+//            if(way == "-1"){
+//                alert("请先选择渠道！！！");
+//                return;
+//            }
+//            window.location = "export.php?statu=3&way="+way;
+//            $('#exportByWay').modal('close');
+//        }
         //滚动条
         $(document).ready(function() {
-            $("#boxscrol").niceScroll("#boxscrol .tableSet",{boxzoom:true}); // First scrollable DIV
+            $("#boxscrol").niceScroll(); // First scrollable DIV
             $("#boxscrol2").niceScroll();
         });
         //时间组件    startDate起始时间，默认为2018.7.10   endDate结束时间，默认到现在
@@ -407,11 +403,11 @@
                 this.getList();
             },
             methods: {
+
                 //获取列表
                 getList: function(){
-                    this.wayList = <?php echo $_SESSION['way']?>;
-                    this.amountList = <?php echo $_SESSION['amount']?>;
-                    console.log(this.amountList);
+                    this.wayList = <?php echo $_SESSION['jsonWay']?>;
+                    this.amountList = <?php echo $_SESSION['jsonAmount']?>;
                     this.statu = 1;
                 },
                 //全选或者反选
@@ -430,7 +426,6 @@
                             amount++;
                         }
                     }
-                    console.log(this.needSelectWay);
                     if(amount == 0){
                         alert("请先选择渠道"); return;
                     }
@@ -440,7 +435,6 @@
                     var endTime = $("#my-endDate").text();
                     this.timeList = this.getDayAll(startTime, endTime);
                     this.dealShowList();
-//                    console.log( this.timeList);
                     this.statu = 2;
                 },
                 //分解时间
@@ -466,12 +460,13 @@
                 },
                 //返回列表
                 backList:function () {
-                    this.statu = 1;
-                    this.ischeckAll = false;
-                    for(var i = 0; i < this.wayList.length; i++){
-                        this.wayList[i].check = this.ischeckAll
-                    }
-                    this.needSelectWay = [];
+//                    this.statu = 1;
+//                    this.ischeckAll = false;
+//                    for(var i = 0; i < this.wayList.length; i++){
+//                        this.wayList[i].check = this.ischeckAll
+//                    }
+//                    this.needSelectWay = [];
+                    window.location = "index.php";
                 },
                 //处理时间和渠道列表的显示数组
                 dealShowList:function () {
@@ -496,7 +491,43 @@
                         }
                         this.showList.push(item);
                     }
-                }
+                },
+                //导出全部
+                exportAll:function () {
+                    window.location = "export.php?statu=1";
+                },
+                //按需导出
+                exportPart:function () {
+//                    console.log(this.needSelectWay);
+                    //设置临时cookie
+                    //获取当前时间
+                    var date=new Date();
+                    //设置5S的过期时间
+                    date.setTime(date.getTime()+500*1000);
+                    document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
+                    //将二维数组的展示列表转给Json
+                    var num = 0;
+                    for(var i = 0; i < this.showList.length; i ++){
+                        document.cookie="showList"+i+"="+JSON.stringify(this.showList[i])+"; expires="+date.toGMTString();
+                        num ++;
+                    }
+                    document.cookie="listNum="+num+"; expires="+date.toGMTString();
+                    window.location = "export.php?statu=2";
+//                    this.$http.post('export.php',{
+//                        statu:2,
+//                        way:this.needSelectWay,
+//                        showList:this.showList,
+//                    })
+//                    axios({
+//                        method: 'post',
+//                        url: 'export.php',
+//                        data: {
+//                            firstName: 'Fred',
+//                            lastName: 'Flintstone'
+//                        }
+//                    });
+                },
+
             },
             watch: {
                 'statu':function () {
