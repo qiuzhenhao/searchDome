@@ -31,7 +31,7 @@
         foreach ($_SESSION['way'] as $key => $value){
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
             if($value['name'] == ""){
-                $value['name'] = "无";
+                $value['name'] = "ios";
             }
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value['name']);
         }
@@ -54,7 +54,7 @@
         $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
         foreach ($needWay as $key => $value){
             if($value == ""){
-                $value = "无";
+                $value = "ios";
             }
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value);
         }

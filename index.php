@@ -1,48 +1,171 @@
 <?php
-    $lifeTime = 24 * 3600;
-    session_set_cookie_params($lifeTime);
-    session_start();
+    //连接本地redis
+    $redis = new Redis();
+    $redis->connect('127.0.0.1', 6379);
+    $redis->select(1);
+     /**************************************************************
+      * timeList    设置存储时间的列表(list)
+      * wayList    设置渠道列表(list)
+      * llen(key)    获取list的长度
+      * lindex(key, index)    根据index获取list的value
+      * rpush(key, value)    添加value值到列表最右边
+      * lrem(key, 0, value)    移除list中所有value
+      * ************************************************************
+      * 设置存储时间和数量关系的列表
+      * timeAmountList    时间和数量表（hash）
+      * hGetAll(key)   获取hashkeykey->value
+      * hset(key, hashkey, value)    设置hashkey->value
+      * hkeys(key)   获取所有hashkey
+      * hlen(key)    获取hashkey的数量
+      * hexists(key, hashkey)    判断hashkey是否存在
+      * hdel(key, hashkey)    删除hashkey
+      **************************************************************
+      * 设置当天的更新时间
+      * updateTime    更新时间（string）
+      **************************************************************/
 
-    if($_SESSION['amount'] == null || $_SESSION['way'] == null || $_SESSION['date'] == null){
+    /**
+     * 判断是否对redis进行修改(每小时可修改一次)
+     */
+    $nowDate = time();
+    if(!$redis->get('updateTime') || $redis->get('updateTime')+60*60 < $nowDate){
+        //连接数据库
         $user = "root";
         //$pass = "";
         $pass = "123456";
         $dbh = new PDO('mysql:host=localhost;dbname=testdb', $user, $pass,array(PDO::MYSQL_ATTR_INIT_COMMAND => "set names utf8"));
-
-        $sqlName = "select channel_name name from app_channel GROUP BY channel_name";
+        // 获取时间
         $sqlTime = "select date_format(created,'%Y-%m-%d') AS time from app_channel GROUP BY time";
-
-        //获取时间,并设置session
-        $date = $dbh->query($sqlTime);
-        $date->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
-        $rsDate = $date->fetchAll();
-        $_SESSION['date'] = $rsDate;
-        //获取渠道,并设置session,json数据用于VUE赋值，用于页面展示
-        $way = $dbh->query($sqlName);
+        $searchTime = $dbh->query($sqlTime);
+        $searchTime->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+        $rsDate = $searchTime->fetchAll();
+        // 获取渠道
+        $sqlWay = "select channel_name name from app_channel GROUP BY channel_name";
+        $way = $dbh->query($sqlWay);
         $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
         $rsWay = $way->fetchAll();
-        foreach ($rsWay as $key => $value){
-            $rsWay[$key]['check'] = false;
-        }
-        $_SESSION['way'] = $rsWay;
-        $reWayJson = json_encode($rsWay);
-        $_SESSION['jsonWay'] = $reWayJson;
 
-        //由日期和渠道获取数量，储存为二维数组， [日期][渠道]
-        foreach ($rsDate as $keyDate=>$valueDate){
+        // 判断数据库的时间数量与redis中缓存的时间数量，只有当缓存的时间数少于数据库的时间数才进入
+        $timeIndex = $redis->lLen('timeList');
+        //    $redis->del('timeList');
+        //    var_dump( $timeIndex = $redis->lLen('timeList'));exit;
+        if(count($rsDate) > $timeIndex){
+            $timeBR = $rsDate[$timeIndex]['time'];
+            $redis->rPush('timeList', $timeBR);
+            // 判断timeAmountList的长度是否为0，为0则表示数据不存在，则执行数据库操作
+            for($i = 0; $i < $redis->lLen('timeList'); $i ++){
+                $timeAR = $redis->lIndex('timeList', $i);
+                if($redis->hlen($timeAR) == 0){
+                    foreach ($rsWay as $keyWay=>$valueWay){
+                        //由时间获取 渠道的数量
+                        $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}' 
+                        and  date_format(created,'%Y-%m-%d') = '{$timeAR}'";
+                        $amount = $dbh->query($sql);
+                        $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+                        $rsAmount = $amount->fetchAll();
+                        $redis->hset($timeAR, $valueWay['name'], $rsAmount[0]['amount']);    //设置hashkey->value
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 当数据库的时间数量与$redis中缓存时间数量相同时，证明是今天，即判断更新时间时候大于一小时, 是则进入
+        if(count($rsDate) == $timeIndex){
+            $selectTime = $rsDate[$timeIndex - 1]['time'];
+            $redis->set('updateTime', $nowDate);
+            // 先删除hashkey
+            if($redis->get('updateTime')){
+                $redis->hDel($selectTime);
+            }
             foreach ($rsWay as $keyWay=>$valueWay){
+                //由时间获取 渠道的数量
                 $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}' 
-                    and  date_format(created,'%Y-%m-%d') = '{$valueDate['time']}'";
+                    and  date_format(created,'%Y-%m-%d') = '{$selectTime}'";
                 $amount = $dbh->query($sql);
                 $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
                 $rsAmount = $amount->fetchAll();
-                $reByWay[$valueWay['name']] = $rsAmount[0]['amount'];
+                $redis->hset($selectTime, $valueWay['name'], $rsAmount[0]['amount']);    //设置hashkey->value
             }
-            $reByAll[$valueDate['time']] = $reByWay;
         }
-        $_SESSION['amount'] = $reByAll;
-        $reAmountJson = json_encode($reByAll);
+
+        // 更新渠道
+        $redis->del('wayList');
+        foreach ($rsWay as $k_way => $v_way){
+            $redis->rPush('wayList', $v_way['name']);
+        }
+    }
+
+    /**
+     * 设置缓存的时间，若未更新到最新的话，则缓存时间应为0
+     */
+    if(!$redis->get('updateTime')){
+        $lifeTime = 0;
+    }else{
+        $lifeTime = 1 * 3600;
+    }
+    // 缓存时间也设置为1小时
+    session_set_cookie_params($lifeTime);
+    session_start();
+    if($_SESSION['amount'] == null || $_SESSION['way'] == null || $_SESSION['date'] == null){
+    //        $user = "root";
+    //        //$pass = "";
+    //        $pass = "123456";
+    //        $dbh = new PDO('mysql:host=localhost;dbname=testdb', $user, $pass,array(PDO::MYSQL_ATTR_INIT_COMMAND => "set names utf8"));
+    //
+    //        $sqlName = "select channel_name name from app_channel GROUP BY channel_name";
+    //        $sqlTime = "select date_format(created,'%Y-%m-%d') AS time from app_channel GROUP BY time";
+    //
+    //        //获取时间,并设置session
+    //        $date = $dbh->query($sqlTime);
+    //        $date->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+    //        $rsDate = $date->fetchAll();
+    //        $_SESSION['date'] = $rsDate;
+    //        //获取渠道,并设置session,json数据用于VUE赋值，用于页面展示
+    //        $way = $dbh->query($sqlName);
+    //        $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+    //        $rsWay = $way->fetchAll();
+    //        foreach ($rsWay as $key => $value){
+    //            $rsWay[$key]['check'] = false;
+    //        }
+        // 添加渠道session
+        $popWayList = [];
+        for($wayNum = 0; $wayNum < $redis->lLen('wayList'); $wayNum ++){
+            $popWayList[$wayNum]['name'] = $redis->lIndex('wayList', $wayNum);
+            $popWayList[$wayNum]['check'] = false;
+        }
+        $_SESSION['way'] = $popWayList;
+        $reWayJson = json_encode($popWayList);
+        $_SESSION['jsonWay'] = $reWayJson;
+        // 添加时间session 和 添加日期和渠道获取数量的session
+        $popTimeList = [];
+        $popAmountList = [];
+        for($timeNum = 0; $timeNum < $redis->lLen('timeList'); $timeNum ++){
+            $linshiTime = $redis->lIndex('timeList', $timeNum);
+            $popTimeList[$timeNum]['time'] = $linshiTime;
+            $popAmountList[$linshiTime] = $redis->hGetAll($linshiTime);
+
+        }
+        $_SESSION['date'] = $popTimeList;
+        $_SESSION['amount'] = $popAmountList;
+        $reAmountJson = json_encode($popAmountList);
         $_SESSION['jsonAmount'] = $reAmountJson;
+
+        //由日期和渠道获取数量，储存为二维数组， [日期][渠道]
+    //        foreach ($rsDate as $keyDate=>$valueDate){
+    //            foreach ($rsWay as $keyWay=>$valueWay){
+    //                $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}'
+    //                    and  date_format(created,'%Y-%m-%d') = '{$valueDate['time']}'";
+    //                $amount = $dbh->query($sql);
+    //                $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+    //                $rsAmount = $amount->fetchAll();
+    //                $reByWay[$valueWay['name']] = $rsAmount[0]['amount'];
+    //            }
+    //            $reByAll[$valueDate['time']] = $reByWay;
+    //        }
+    //        $_SESSION['amount'] = $reByAll;
+    //        $reAmountJson = json_encode($reByAll);
+    //        $_SESSION['jsonAmount'] = $reAmountJson;
     }
 
     //表格纵列
@@ -63,92 +186,29 @@
         $tableHead[] = $ch;
     }
     $_SESSION['tableHead'] = $tableHead;
+
+
+
+
 ?>
+
+
 
 <!DOCTYPE html>
 <html>
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>search</title>
-    <link rel="stylesheet" href="amazeui.min.css">
-    <link rel="stylesheet" href="admin.css">
+    <link rel="stylesheet" href="css/amazeui.min.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <link rel="stylesheet" href="css/search.css">
 </head>
-<style>
-
-    select{
-        margin-right: 20px;
-    }
-    .content input,button{
-        width:100px;
-        margin-right: 20px;
-    }
-    .buttonGroup{
-        padding-top: 50px;
-    }
-    .am-modal-bd{
-        height: 100%;
-        width:100%;
-        background-color: white;
-    }
-    .content{
-        margin-left: 20%;
-        margin-top:2%;
-        margin-bottom: 5%;
-    }
-    .tableSet{
-        margin-top: 15px;
-        width: 100%;
-        height: 100%;
-    }
-    .tableSet tr{
-        height: 50px;
-    }
-    .tableSet td{
-        font-size: 20px;
-        border-top:1px dashed #c2c2c2;
-        border-bottom:1px dashed #c2c2c2;
-    }
-    #boxscrol {
-        width: 72%;
-        height: 850px;
-        overflow: auto;
-        margin-bottom:20px;
-    }
-    .selectPage{
-        margin-left: 17%;
-        margin-top:2%;
-        margin-bottom: 5%;
-    }
-    .selectPage .top{
-        width: 80%;
-        height: 80px;
-        text-align: center;
-    }
-    .selectPage .top .am-btn-group{
-        float:right;
-        margin-top:30px;
-        margin-right:30px;
-    }
-    .selectPage .tableSetSelect{
-        margin-top: 15px;
-    }
-    .selectPage .tableSetSelect tr td{
-        word-break: keep-all;
-        white-space:nowrap;
-        padding: 0px 8px 0px 8px;
-        height: 70px;
-        text-align: center;
-    }
-    #boxscrol2 {
-        width: 1250px;
-        height: 850px;
-        overflow: auto;
-        margin-bottom:20px;
-    }
-
-</style>
 <body>
     <div id="vueApp">
+        <div class="timeRight">
+            <span>更新时间：</span>
+            <span v-text="nowDateFloat"></span>
+        </div>
         <div class="content" v-if="statu == 1">
             <div class="am-g">
                 <div class="am-u-sm-5">
@@ -178,7 +238,7 @@
                     </tr>
                     <tr v-for="(key,value) in wayList">
                         <td style="width: 50px"><input type="checkbox" id="{{key}}" v-model="value.check" style="zoom:130%;"></td>
-                        <td ><span v-text="value.name ==''?'无':value.name"></span></td>
+                        <td ><span v-text="value.name ==''?'ios':value.name"></span></td>
                     </tr>
                 </table>
             </div>
@@ -196,7 +256,7 @@
                 <table class="tableSetSelect" border="1" cellspacing="0">
                     <tr>
                         <td>日期</td>
-                        <td v-for="way in needSelectWay" v-text="way == ''?'无':way"></td>
+                        <td v-for="way in needSelectWay" v-text="way == ''?'ios':way"></td>
                     </tr>
                     <tr v-for="time in showList">
                         <td v-for="amount in time" v-text="amount"></td>
@@ -221,98 +281,14 @@
 <!---->
 <!--        </div>-->
 <!--    </div>-->
-<!--    <!--   根据日期导出弹出窗 -->-->
-<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByTime">-->
-<!--        <div class="am-modal-dialog" style="width:450px; height: 200px">-->
-<!--            <div class="am-modal-hd">根据日期导出-->
-<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
-<!--            </div>-->
-<!--            <div class="am-modal-bd">-->
-<!--                <div class="centent">-->
-<!--                    <select name="time" id="selectTimeValue">-->
-<!--                        <option value ="-1">日期选择</option>-->
-<!--                        --><?php
-//                        foreach ($_SESSION['date'] as $row) {
-//                            if($row['time'] == null || $row['time'] == ""){
-//                                $row['time'] = "无";
-//                            }
-//                            ?>
-<!--                            <option value ="--><?php //echo $row['time']; ?><!--">--><?php //echo $row['time'];?><!--</option>-->
-<!--                            --><?php
-//                        }
-//                        ?>
-<!--                    </select>-->
-<!--                    <button type="button" class="am-btn am-btn-success am-btn-sm" onclick="exportByTimeConfirm()">确定</button>-->
-<!--                </div>-->
-<!---->
-<!--            </div>-->
-<!--        </div>-->
-<!--    </div>-->
-<!--    <!--   根据渠道导出弹出窗 -->-->
-<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="exportByWay">-->
-<!--        <div class="am-modal-dialog" style="width:450px; height: 200px">-->
-<!--            <div class="am-modal-hd">根据渠道导出-->
-<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
-<!--            </div>-->
-<!--            <div class="am-modal-bd">-->
-<!--                <div class="centent">-->
-<!--                    <select name="name" id="selectWayValue"">-->
-<!--                        <option value ="-1">渠道选择</option>-->
-<!--                        --><?php
-//                        foreach ($_SESSION['way'] as $row) {
-//                            if($row['name'] == null || $row['name'] == ""){
-//                                $row['name'] = "无";
-//                            }
-//                            ?>
-<!--                            <option value ="--><?php //echo $row['name']; ?><!--">--><?php //echo $row['name'];?><!--</option>-->
-<!--                            --><?php
-//                        }
-//                        ?>
-<!--                    </select>-->
-<!--                    <button type="button" class="am-btn am-btn-primary am-btn-sm" onclick="exportByWayConfirm()">确定</button>-->
-<!--                </div>-->
-<!---->
-<!--            </div>-->
-<!--        </div>-->
-<!--    </div>-->
-    <script src="jquery.min.js"></script>
-    <script src="amazeui.min.js"></script>
-    <script src="jquery.nicescroll.min.js"></script>
-    <script src="vue/vue.min.js"></script>
-    <script src="vue/vue-resource.min.js"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
+    <script src="js/jquery.min.js"></script>
+    <script src="js/amazeui.min.js"></script>
+    <script src="js/jquery.nicescroll.min.js"></script>
+    <script src="js/vue/vue.min.js"></script>
+    <script src="js/vue/vue-resource.min.js"></script>
+<!--    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>-->
     <script type="text/javascript">
-//        //statu = 1 导出全部    statu = 2 按时间导出    statu = 3 按渠道导出
-//        function exportAll() {
-//            window.location = "export.php?statu=1";
-//            $('#export').modal('close');
-//        }
-//        function exportByTime() {
-//            $('#export').modal('close');
-//            $('#exportByTime').modal('open');
-//        }
-//        function exportByWay() {
-//            $('#export').modal('close');
-//            $('#exportByWay').modal('open');
-//        }
-//        function exportByTimeConfirm() {
-//            var time = $('#selectTimeValue option:selected') .val();//选中的值
-//            if(time == "-1"){
-//                alert("请先选择时间！！！");
-//                return;
-//            }
-//            window.location = "export.php?statu=2&time="+time;
-//            $('#exportByTime').modal('close');
-//        }
-//        function exportByWayConfirm() {
-//            var way = $('#selectWayValue option:selected') .val();//选中的值
-//            if(way == "-1"){
-//                alert("请先选择渠道！！！");
-//                return;
-//            }
-//            window.location = "export.php?statu=3&way="+way;
-//            $('#exportByWay').modal('close');
-//        }
         //滚动条
         $(document).ready(function() {
             $("#boxscrol").niceScroll(); // First scrollable DIV
@@ -398,6 +374,8 @@
                 timeList:[],
                 //查询展示列表
                 showList:[],
+                //目前跟新到的日期
+                nowDateFloat:'',
             },
             created: function(){
                 this.getList();
@@ -409,6 +387,9 @@
                     this.wayList = <?php echo $_SESSION['jsonWay']?>;
                     this.amountList = <?php echo $_SESSION['jsonAmount']?>;
                     this.statu = 1;
+                    this.nowDateFloat = "<?php echo $redis->lIndex('timeList', $redis->lLen('timeList') - 1)?>";
+                    console.log(this.nowDateFloat);
+
                 },
                 //全选或者反选
                 checkAll:function () {
@@ -435,6 +416,7 @@
                     var endTime = $("#my-endDate").text();
                     this.timeList = this.getDayAll(startTime, endTime);
                     this.dealShowList();
+                    console.log(this.amountList);
                     this.statu = 2;
                 },
                 //分解时间
@@ -452,7 +434,7 @@
                         var date = new Date(k);
                         var Y = date.getFullYear() + '-';
                         var M = (date.getMonth()+1 < 10 ? '0'+(date.getMonth()+1) : date.getMonth()+1) + '-';
-                        var D = date.getDate();
+                        var D = date.getDate() < 10 ? '0'+date.getDate() : date.getDate();
                         dateAllArr.push((Y+M+D).toString());
                         k=k+24*60*60*1000;
                     }
@@ -460,17 +442,13 @@
                 },
                 //返回列表
                 backList:function () {
-//                    this.statu = 1;
-//                    this.ischeckAll = false;
-//                    for(var i = 0; i < this.wayList.length; i++){
-//                        this.wayList[i].check = this.ischeckAll
-//                    }
-//                    this.needSelectWay = [];
                     window.location = "index.php";
                 },
                 //处理时间和渠道列表的显示数组
                 dealShowList:function () {
+
                     for(var i = 0; i < this.timeList.length; i ++){
+
                         var item = [];
                         //如果查询的时间数据库中不存在的话数据就全部赋0， 否则将数据库的中数量读出
                         var statuForTime = 0;
