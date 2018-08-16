@@ -1,34 +1,23 @@
 <?php
-    //连接本地redis
-    $redis = new Redis();
-    $redis->connect('127.0.0.1', 6379);
-    $redis->select(1);
-     /**************************************************************
-      * timeList    设置存储时间的列表(list)
-      * wayList    设置渠道列表(list)
-      * llen(key)    获取list的长度
-      * lindex(key, index)    根据index获取list的value
-      * rpush(key, value)    添加value值到列表最右边
-      * lrem(key, 0, value)    移除list中所有value
-      * ************************************************************
-      * 设置存储时间和数量关系的列表
-      * timeAmountList    时间和数量表（hash）
-      * hGetAll(key)   获取hashkeykey->value
-      * hset(key, hashkey, value)    设置hashkey->value
-      * hkeys(key)   获取所有hashkey
-      * hlen(key)    获取hashkey的数量
-      * hexists(key, hashkey)    判断hashkey是否存在
-      * hdel(key, hashkey)    删除hashkey
-      **************************************************************
-      * 设置当天的更新时间
-      * updateTime    更新时间（string）
-      **************************************************************/
 
-    /**
-     * 判断是否对redis进行修改(每小时可修改一次)
-     */
+    // 连接本地memcached
+    $memcache = new Memcache();
+    $memcache->connect('127.0.0.1',11211) or die('shit');
+    /**************************************************************
+     * **********  变量表 **********
+     * timeList    设置存储时间的列表
+     * wayList    设置渠道列表
+     * timeAmountList    时间和数量表
+     * updateTime    设置当天的更新时间
+     * nowDate    用于页面显示
+     * ************************************************************
+     * **********  操作表  *********
+     * set(key, value)    更新该key所对应的原来的数据
+     * get(key)     获取该key对应的value, 如key不存在则返回false
+     * delete(key)    删除key, 存在则返回true, 否则返回false
+     **************************************************************/
     $nowDate = time();
-    if(!$redis->get('updateTime') || $redis->get('updateTime')+60*60 < $nowDate){
+    if(!$memcache->get('updateTime') || $memcache->get('updateTime')+60*60 < $nowDate){
         //连接数据库
         $user = "root";
         //$pass = "";
@@ -45,154 +34,112 @@
         $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
         $rsWay = $way->fetchAll();
 
-        // 判断数据库的时间数量与redis中缓存的时间数量，只有当缓存的时间数少于数据库的时间数才进入
-        $timeIndex = $redis->lLen('timeList');
-        //    $redis->del('timeList');
-        //    var_dump( $timeIndex = $redis->lLen('timeList'));exit;
-        if(count($rsDate) > $timeIndex){
-            $timeBR = $rsDate[$timeIndex]['time'];
-            $redis->rPush('timeList', $timeBR);
+        //获取memcached 中的时间列表, 判断数据库的时间数量与缓存的时间数量，只有当缓存的时间数少于数据库的时间数才进入
+        $getMemcachedTimeList = $memcache->get('timeList');
+        if($getMemcachedTimeList){
+            $memcacheTimeListNum = count($getMemcachedTimeList);
+        }else{
+            $memcacheTimeListNum = 0;
+            $getMemcachedTimeList = [];
+        }
+        //获取memcached 中的渠道列表
+        $getMemcachedWayList = $memcache->get('wayList');
+        if(!$getMemcachedWayList){
+            $getMemcachedWayList = [];
+        }
+        //获取memcached 时间和数量表
+        $getMemcachedTimeAmountList = $memcache->get('timeAmountList');
+        if(!$getMemcachedTimeAmountList){
+            $getMemcachedTimeAmountList = [];
+        }
+        //获取memcached 的当天更新时间
+        $getMemcachedUpdateTime = $memcache->get('updateTime');
+        if(!$getMemcachedUpdateTime){
+            $getMemcachedUpdateTime = '';
+        }
+        //当数据库的最新日期不是今天时进入
+        if(count($rsDate) > $memcacheTimeListNum){
+            $memcache->delete('updateTime');
+            $timeBR = $rsDate[$memcacheTimeListNum];
+            $memcache->set('nowDate', $timeBR['time']);
+            array_push($getMemcachedTimeList, $timeBR);
             // 判断timeAmountList的长度是否为0，为0则表示数据不存在，则执行数据库操作
-            for($i = 0; $i < $redis->lLen('timeList'); $i ++){
-                $timeAR = $redis->lIndex('timeList', $i);
-                if($redis->hlen($timeAR) == 0){
-                    foreach ($rsWay as $keyWay=>$valueWay){
-                        //由时间获取 渠道的数量
-                        $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}' 
-                        and  date_format(created,'%Y-%m-%d') = '{$timeAR}'";
-                        $amount = $dbh->query($sql);
-                        $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
-                        $rsAmount = $amount->fetchAll();
-                        $redis->hset($timeAR, $valueWay['name'], $rsAmount[0]['amount']);    //设置hashkey->value
-                    }
-                    break;
+            for(; $memcacheTimeListNum < count($getMemcachedTimeList); $memcacheTimeListNum ++){
+                $timeAR = $getMemcachedTimeList[$memcacheTimeListNum]['time'];
+                foreach ($rsWay as $keyWay=>$valueWay){
+                    //由时间获取 渠道的数量
+                    $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}'
+                    and  date_format(created,'%Y-%m-%d') = '{$timeAR}'";
+                    $amount = $dbh->query($sql);
+                    $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+                    $rsAmount = $amount->fetchAll();
+                    $getMemcachedTimeAmountList[$timeAR][$valueWay['name']] = $rsAmount[0]['amount'];
                 }
             }
         }
-
         // 当数据库的时间数量与$redis中缓存时间数量相同时，证明是今天，即判断更新时间时候大于一小时, 是则进入
-        if(count($rsDate) == $timeIndex){
-            $selectTime = $rsDate[$timeIndex - 1]['time'];
-            $redis->set('updateTime', $nowDate);
-            // 先删除hashkey
-            if($redis->get('updateTime')){
-                $redis->hDel($selectTime);
-            }
+        if(count($rsDate) == $memcacheTimeListNum){
+            $selectTime = $rsDate[$memcacheTimeListNum - 1]['time'];
+            $memcache->set('nowDate', $selectTime);
+            $memcache->set('updateTime', $nowDate);
             foreach ($rsWay as $keyWay=>$valueWay){
                 //由时间获取 渠道的数量
-                $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}' 
+                $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}'
                     and  date_format(created,'%Y-%m-%d') = '{$selectTime}'";
                 $amount = $dbh->query($sql);
                 $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
                 $rsAmount = $amount->fetchAll();
-                $redis->hset($selectTime, $valueWay['name'], $rsAmount[0]['amount']);    //设置hashkey->value
+                $getMemcachedTimeAmountList[$timeAR][$valueWay['name']] = $rsAmount[0]['amount'];
             }
         }
+        //更新memcached
+        $memcache->set('timeList', $getMemcachedTimeList);
+        $memcache->set('wayList', $rsWay);
+        $memcache->set('timeAmountList', $getMemcachedTimeAmountList);
 
-        // 更新渠道
-        $redis->del('wayList');
-        foreach ($rsWay as $k_way => $v_way){
-            $redis->rPush('wayList', $v_way['name']);
-        }
-    }
-
-    /**
-     * 设置缓存的时间，若未更新到最新的话，则缓存时间应为0
-     */
-    if(!$redis->get('updateTime')){
-        $lifeTime = 0;
-    }else{
-        $lifeTime = 1 * 3600;
-    }
-    // 缓存时间也设置为1小时
-    session_set_cookie_params($lifeTime);
-    session_start();
-    if($_SESSION['amount'] == null || $_SESSION['way'] == null || $_SESSION['date'] == null){
-    //        $user = "root";
-    //        //$pass = "";
-    //        $pass = "123456";
-    //        $dbh = new PDO('mysql:host=localhost;dbname=testdb', $user, $pass,array(PDO::MYSQL_ATTR_INIT_COMMAND => "set names utf8"));
-    //
-    //        $sqlName = "select channel_name name from app_channel GROUP BY channel_name";
-    //        $sqlTime = "select date_format(created,'%Y-%m-%d') AS time from app_channel GROUP BY time";
-    //
-    //        //获取时间,并设置session
-    //        $date = $dbh->query($sqlTime);
-    //        $date->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
-    //        $rsDate = $date->fetchAll();
-    //        $_SESSION['date'] = $rsDate;
-    //        //获取渠道,并设置session,json数据用于VUE赋值，用于页面展示
-    //        $way = $dbh->query($sqlName);
-    //        $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
-    //        $rsWay = $way->fetchAll();
-    //        foreach ($rsWay as $key => $value){
-    //            $rsWay[$key]['check'] = false;
-    //        }
+        /*****************************************
+         * session
+         *****************************************/
+        $lifeTime = 1 * 3600;    //设置过期时间为1小时
+        session_set_cookie_params($lifeTime);
+        session_start();
         // 添加渠道session
-        $popWayList = [];
-        for($wayNum = 0; $wayNum < $redis->lLen('wayList'); $wayNum ++){
-            $popWayList[$wayNum]['name'] = $redis->lIndex('wayList', $wayNum);
+        $popWayList = $memcache->get('wayList');
+        for($wayNum = 0; $wayNum < count($popWayList); $wayNum ++){
             $popWayList[$wayNum]['check'] = false;
         }
         $_SESSION['way'] = $popWayList;
         $reWayJson = json_encode($popWayList);
         $_SESSION['jsonWay'] = $reWayJson;
         // 添加时间session 和 添加日期和渠道获取数量的session
-        $popTimeList = [];
-        $popAmountList = [];
-        for($timeNum = 0; $timeNum < $redis->lLen('timeList'); $timeNum ++){
-            $linshiTime = $redis->lIndex('timeList', $timeNum);
-            $popTimeList[$timeNum]['time'] = $linshiTime;
-            $popAmountList[$linshiTime] = $redis->hGetAll($linshiTime);
-
-        }
+        $popTimeList = $memcache->get('timeList');
+        $popAmountList = $memcache->get('timeAmountList');
         $_SESSION['date'] = $popTimeList;
         $_SESSION['amount'] = $popAmountList;
         $reAmountJson = json_encode($popAmountList);
         $_SESSION['jsonAmount'] = $reAmountJson;
-
-        //由日期和渠道获取数量，储存为二维数组， [日期][渠道]
-    //        foreach ($rsDate as $keyDate=>$valueDate){
-    //            foreach ($rsWay as $keyWay=>$valueWay){
-    //                $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}'
-    //                    and  date_format(created,'%Y-%m-%d') = '{$valueDate['time']}'";
-    //                $amount = $dbh->query($sql);
-    //                $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
-    //                $rsAmount = $amount->fetchAll();
-    //                $reByWay[$valueWay['name']] = $rsAmount[0]['amount'];
-    //            }
-    //            $reByAll[$valueDate['time']] = $reByWay;
-    //        }
-    //        $_SESSION['amount'] = $reByAll;
-    //        $reAmountJson = json_encode($reByAll);
-    //        $_SESSION['jsonAmount'] = $reAmountJson;
-    }
-
-    //表格纵列
-    $tableHead = [];
-    $num = 0;
-    for($i = 0; $i < count($_SESSION['way']); $i ++){
-        $ch = "";
-        $num = $i;
-        if($i < 25){
-            $ch = chr(ord('B')+$num);
-        }else if($i > 24 && $i < 51){
-            $num = $num - 25;
-            $ch = 'A'.chr(ord('A')+$num);
-        }else{
-            $num = $num - 51;
-            $ch = 'B'.chr(ord('A')+$num);
+        //表格纵列
+        $tableHead = [];
+        $num = 0;
+        for($i = 0; $i < count($_SESSION['way']); $i ++){
+            $ch = "";
+            $num = $i;
+            if($i < 25){
+                $ch = chr(ord('B')+$num);
+            }else if($i > 24 && $i < 51){
+                $num = $num - 25;
+                $ch = 'A'.chr(ord('A')+$num);
+            }else{
+                $num = $num - 51;
+                $ch = 'B'.chr(ord('A')+$num);
+            }
+            $tableHead[] = $ch;
         }
-        $tableHead[] = $ch;
+        $_SESSION['tableHead'] = $tableHead;
+    }else{
+        session_start();
     }
-    $_SESSION['tableHead'] = $tableHead;
-
-
-
-
 ?>
-
-
 
 <!DOCTYPE html>
 <html>
@@ -265,29 +212,11 @@
             </div>
         </div>
     </div>
-    <!--   弹出窗 -->
-<!--    <div class="am-modal am-modal-no-btn" tabindex="-1" id="export">-->
-<!--        <div class="am-modal-dialog">-->
-<!--            <div class="am-modal-hd">导出选择-->
-<!--                <a href="javascript: void(0)" class="am-close am-close-spin" data-am-modal-close>&times;</a>-->
-<!--            </div>-->
-<!--            <div class="am-modal-bd">-->
-<!--                <div class="buttonGroup">-->
-<!--                    <button type="button" class="am-btn am-btn-success am-round" onclick="exportAll()">导出全部</button>-->
-<!--                    <button type="button" class="am-btn am-btn-secondary am-round" onclick="exportByTime()">按日期导出</button>-->
-<!--                    <button type="button" class="am-btn am-btn-primary am-round" onclick="exportByWay()">按渠道导出</button>-->
-<!--                </div>-->
-<!--            </div>-->
-<!---->
-<!--        </div>-->
-<!--    </div>-->
-
     <script src="js/jquery.min.js"></script>
     <script src="js/amazeui.min.js"></script>
     <script src="js/jquery.nicescroll.min.js"></script>
     <script src="js/vue/vue.min.js"></script>
     <script src="js/vue/vue-resource.min.js"></script>
-<!--    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>-->
     <script type="text/javascript">
         //滚动条
         $(document).ready(function() {
@@ -354,9 +283,9 @@
             });
         });
 
-        //
-        // vue
-        //
+        //######//
+        // vue //
+        //#####//
         var vm = new Vue({
             el: '#vueApp',
             data: {
@@ -381,13 +310,12 @@
                 this.getList();
             },
             methods: {
-
                 //获取列表
                 getList: function(){
                     this.wayList = <?php echo $_SESSION['jsonWay']?>;
                     this.amountList = <?php echo $_SESSION['jsonAmount']?>;
                     this.statu = 1;
-                    this.nowDateFloat = "<?php echo $redis->lIndex('timeList', $redis->lLen('timeList') - 1)?>";
+                    this.nowDateFloat = "<?php echo $memcache->get('nowDate')?>";
                     console.log(this.nowDateFloat);
 
                 },
@@ -415,8 +343,8 @@
                     var startTime = $("#my-startDate").text();
                     var endTime = $("#my-endDate").text();
                     this.timeList = this.getDayAll(startTime, endTime);
+                    console.log(this.timeList);
                     this.dealShowList();
-                    console.log(this.amountList);
                     this.statu = 2;
                 },
                 //分解时间
@@ -446,9 +374,7 @@
                 },
                 //处理时间和渠道列表的显示数组
                 dealShowList:function () {
-
                     for(var i = 0; i < this.timeList.length; i ++){
-
                         var item = [];
                         //如果查询的时间数据库中不存在的话数据就全部赋0， 否则将数据库的中数量读出
                         var statuForTime = 0;
@@ -476,34 +402,16 @@
                 },
                 //按需导出
                 exportPart:function () {
-//                    console.log(this.needSelectWay);
                     //设置临时cookie
                     //获取当前时间
                     var date=new Date();
                     //设置5S的过期时间
                     date.setTime(date.getTime()+500*1000);
+                    //需要导出的渠道
                     document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
-                    //将二维数组的展示列表转给Json
-                    var num = 0;
-                    for(var i = 0; i < this.showList.length; i ++){
-                        document.cookie="showList"+i+"="+JSON.stringify(this.showList[i])+"; expires="+date.toGMTString();
-                        num ++;
-                    }
-                    document.cookie="listNum="+num+"; expires="+date.toGMTString();
+                    //需要导出的时间
+                    document.cookie="needTime="+JSON.stringify(this.timeList)+"; expires="+date.toGMTString();
                     window.location = "export.php?statu=2";
-//                    this.$http.post('export.php',{
-//                        statu:2,
-//                        way:this.needSelectWay,
-//                        showList:this.showList,
-//                    })
-//                    axios({
-//                        method: 'post',
-//                        url: 'export.php',
-//                        data: {
-//                            firstName: 'Fred',
-//                            lastName: 'Flintstone'
-//                        }
-//                    });
                 },
 
             },

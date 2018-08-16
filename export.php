@@ -9,14 +9,20 @@
 //    }
 
     session_start();
+    $showAmountArr = $_SESSION['amount'];
     $statu = $_GET['statu'];        //公共参数  $statu = 1全部导出   $statu = 2按需导出
     $needWay = json_decode($_COOKIE['needWay']);
-    //判断展示行数
-    $listNum = $_COOKIE['listNum'];
+    $needTime = json_decode($_COOKIE['needTime']);
+
     //展示数据
     $showList = [];
-    for($i = 0; $i < $listNum; $i ++){
-        $showList[] = json_decode($_COOKIE['showList'.$i]);
+    foreach ($needTime as $k_nt=>$v_nt){
+        $rowShow = [];
+        $rowShow[] = $v_nt;
+        foreach ($needWay as $k_nw=>$v_nw){
+            $rowShow[] = $showAmountArr[$v_nt][$v_nw];
+        }
+        $showList[] = $rowShow;
     }
 
     require_once dirname(__FILE__) . '/PHPExcel/Classes/PHPExcel.php';
