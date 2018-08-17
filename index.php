@@ -7,10 +7,12 @@
     /**************************************************************
      * **********  变量表 **********
      * sdTimeList    设置存储时间的列表
-     * sdWayList    设置渠道列表
-     * sdTimeAmountList    时间和数量表
-     * sdUpdateTime    设置当天的更新时间
-     * sdnowDate    用于页面显示
+     * sdWayListJson    渠道列表的json
+     * sdTimeAmountListJson    时间和数量表Json
+     * sdUpdateTime    设置当天的更新时间（格式为时间搓）
+     * sdnowDate    用于页面显示时间（刷新所至显示数据的时间）
+     * sdnowTime    最新刷新的时间，用于判断是否需要更新前一天的数据，如不是当天的时间，则需要更新前一天的数据（格式为Y-m-d）
+     * sdTableHead    用于导出设置表列
      * ************************************************************
      * **********  操作表  *********
      * set(key, value)    更新该key所对应的原来的数据
@@ -34,6 +36,9 @@
         $way = $dbh->query($sqlWay);
         $way->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
         $rsWay = $way->fetchAll();
+        foreach ($rsWay as $k_reWay=>$v_reWay){
+            $rsWay[$k_reWay]['check'] = false;
+        }
 
         //获取memcached 中的时间列表, 判断数据库的时间数量与缓存的时间数量，只有当缓存的时间数少于数据库的时间数才进入
         $getMemcachedTimeList = $memcache->get('sdTimeList');
@@ -44,27 +49,48 @@
             $getMemcachedTimeList = [];
         }
         //获取memcached 中的渠道列表
-        $getMemcachedWayList = $memcache->get('sdWayList');
+        $getMemcachedWayList = $memcache->get('sdWayListJson');
         if(!$getMemcachedWayList){
             $getMemcachedWayList = [];
+        }else{
+            $getMemcachedWayList = json_decode($getMemcachedWayList, true);
         }
         //获取memcached 时间和数量表
-        $getMemcachedTimeAmountList = $memcache->get('sdTimeAmountList');
+        $getMemcachedTimeAmountList = $memcache->get('sdTimeAmountListJson');
         if(!$getMemcachedTimeAmountList){
             $getMemcachedTimeAmountList = [];
+        }else{
+            $getMemcachedTimeAmountList = json_decode($getMemcachedTimeAmountList, true);
         }
         //获取memcached 的当天更新时间
         $getMemcachedUpdateTime = $memcache->get('sdUpdateTime');
         if(!$getMemcachedUpdateTime){
             $getMemcachedUpdateTime = '';
         }
+        //获取最新刷新时间
+        $newF5Time = $memcache->get('sdnowTime');
+        if(!$newF5Time){
+            $newF5Time = date("Y-m-d");
+        }
+        if($newF5Time != date("Y-m-d") ){
+            $refreshTime = $getMemcachedTimeList[count($getMemcachedTimeList) - 1];
+            foreach ($rsWay as $keyWay=>$valueWay){
+                //由时间获取 渠道的数量
+                $sql = "select count(*) amount from app_channel where channel_name = '{$valueWay['name']}'
+                    and  date_format(created,'%Y-%m-%d') = '{$refreshTime}'";
+                $amount = $dbh->query($sql);
+                $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
+                $rsAmount = $amount->fetchAll();
+                $getMemcachedTimeAmountList[$refreshTime][$valueWay['name']] = $rsAmount[0]['amount'];
+            }
+        }
+
         //当数据库的最新日期不是今天时进入
         if(count($rsDate) > $memcacheTimeListNum){
             $memcache->delete('sdUpdateTime');
             $timeBR = $rsDate[$memcacheTimeListNum];
             $memcache->set('sdnowDate', $timeBR['time']);
             array_push($getMemcachedTimeList, $timeBR);
-            // 判断timeAmountList的长度是否为0，为0则表示数据不存在，则执行数据库操作
             for(; $memcacheTimeListNum < count($getMemcachedTimeList); $memcacheTimeListNum ++){
                 $timeAR = $getMemcachedTimeList[$memcacheTimeListNum]['time'];
                 foreach ($rsWay as $keyWay=>$valueWay){
@@ -90,39 +116,42 @@
                 $amount = $dbh->query($sql);
                 $amount->setFetchMode(PDO::FETCH_ASSOC);    //设置结果集返回格式,此处为关联数组,即不包含index下标
                 $rsAmount = $amount->fetchAll();
-                $getMemcachedTimeAmountList[$timeAR][$valueWay['name']] = $rsAmount[0]['amount'];
+                $getMemcachedTimeAmountList[$selectTime][$valueWay['name']] = $rsAmount[0]['amount'];
             }
         }
         //更新memcached
         $memcache->set('sdTimeList', $getMemcachedTimeList);
-        $memcache->set('sdWayList', $rsWay);
-        $memcache->set('sdTimeAmountList', $getMemcachedTimeAmountList);
+//        $memcache->set('sdWayList', $rsWay);
+        $memcache->set('sdWayListJson', json_encode($rsWay));
+//        $memcache->set('sdTimeAmountList', $getMemcachedTimeAmountList);
+        $memcache->set('sdTimeAmountListJson', json_encode($getMemcachedTimeAmountList));
+        $memcache->set('sdnowTime', date("Y-m-d"));
 
-        /*****************************************
-         * session
-         *****************************************/
-        $lifeTime = 1 * 3600;    //设置过期时间为1小时
-        session_set_cookie_params($lifeTime);
-        session_start();
-        // 添加渠道session
-        $popWayList = $memcache->get('sdWayList');
-        for($wayNum = 0; $wayNum < count($popWayList); $wayNum ++){
-            $popWayList[$wayNum]['check'] = false;
-        }
-        $_SESSION['way'] = $popWayList;
-        $reWayJson = json_encode($popWayList);
-        $_SESSION['jsonWay'] = $reWayJson;
-        // 添加时间session 和 添加日期和渠道获取数量的session
-        $popTimeList = $memcache->get('sdTimeList');
-        $popAmountList = $memcache->get('sdTimeAmountList');
-        $_SESSION['date'] = $popTimeList;
-        $_SESSION['amount'] = $popAmountList;
-        $reAmountJson = json_encode($popAmountList);
-        $_SESSION['jsonAmount'] = $reAmountJson;
+//        /*****************************************
+//         * session
+//         *****************************************/
+//        $lifeTime = 1 * 3600;    //设置过期时间为1小时
+//        session_set_cookie_params($lifeTime);
+//        session_start();
+//        // 添加渠道session
+//        $popWayList = $memcache->get('sdWayList');
+//        for($wayNum = 0; $wayNum < count($popWayList); $wayNum ++){
+//            $popWayList[$wayNum]['check'] = false;
+//        }
+//        $_SESSION['way'] = $popWayList;
+//        $reWayJson = json_encode($popWayList);
+//        $_SESSION['jsonWay'] = $reWayJson;
+//        // 添加时间session 和 添加日期和渠道获取数量的session
+//        $popTimeList = $memcache->get('sdTimeList');
+//        $popAmountList = $memcache->get('sdTimeAmountList');
+//        $_SESSION['date'] = $popTimeList;
+//        $_SESSION['amount'] = $popAmountList;
+//        $reAmountJson = json_encode($popAmountList);
+//        $_SESSION['jsonAmount'] = $reAmountJson;
         //表格纵列
         $tableHead = [];
         $num = 0;
-        for($i = 0; $i < count($_SESSION['way']); $i ++){
+        for($i = 0; $i < count($rsWay); $i ++){
             $ch = "";
             $num = $i;
             if($i < 25){
@@ -136,9 +165,9 @@
             }
             $tableHead[] = $ch;
         }
-        $_SESSION['tableHead'] = $tableHead;
-    }else{
-        session_start();
+        $memcache->set('sdTableHead', $tableHead);
+//        $_SESSION['tableHead'] = $tableHead;
+
     }
 ?>
 
@@ -313,8 +342,9 @@
             methods: {
                 //获取列表
                 getList: function(){
-                    this.wayList = <?php echo $_SESSION['jsonWay']?>;
-                    this.amountList = <?php echo $_SESSION['jsonAmount']?>;
+                    this.wayList = <?php echo $memcache->get('sdWayListJson')?>;
+                    console.log(this.wayList)
+                    this.amountList = <?php echo $memcache->get('sdTimeAmountListJson')?>;
                     this.statu = 1;
                     this.nowDateFloat = "<?php echo $memcache->get('sdnowDate')?>";
                     console.log(this.nowDateFloat);
@@ -405,8 +435,8 @@
                     //设置临时cookie
                     //获取当前时间
                     var date=new Date();
-                    //设置5S的过期时间
-                    date.setTime(date.getTime()+500*1000);
+                    //设置2S的过期时间
+                    date.setTime(date.getTime()+2*1000);
                     //需要导出的渠道
                     document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
                     //需要导出的时间

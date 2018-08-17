@@ -7,23 +7,14 @@
 //    } catch(Exception $e) {
 //        die('Connect Failed Message: ' . $e->getMessage());
 //    }
+    // 连接本地memcached
+    $memcache = new Memcache();
+    $memcache->connect('127.0.0.1',11211) or die('shit');
 
-    session_start();
-    $showAmountArr = $_SESSION['amount'];
+    $showAmountArr = json_decode($memcache->get('sdTimeAmountListJson'), true);
+    $wayList = json_decode($memcache->get('sdWayListJson'), true);
+    $tableHead = $memcache->get('sdTableHead');
     $statu = $_GET['statu'];        //公共参数  $statu = 1全部导出   $statu = 2按需导出
-    $needWay = json_decode($_COOKIE['needWay']);
-    $needTime = json_decode($_COOKIE['needTime']);
-
-    //展示数据
-    $showList = [];
-    foreach ($needTime as $k_nt=>$v_nt){
-        $rowShow = [];
-        $rowShow[] = $v_nt;
-        foreach ($needWay as $k_nw=>$v_nw){
-            $rowShow[] = $showAmountArr[$v_nt][$v_nw];
-        }
-        $showList[] = $rowShow;
-    }
 
     require_once dirname(__FILE__) . '/PHPExcel/Classes/PHPExcel.php';
     $objPHPExcel = new PHPExcel();
@@ -34,27 +25,42 @@
     if($statu == 1){
         $title = "导出所有详情";
         //表头
-        foreach ($_SESSION['way'] as $key => $value){
+        foreach ($wayList as $key => $value){
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
             if($value['name'] == ""){
                 $value['name'] = "ios";
             }
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value['name']);
+            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($tableHead[$key].'1', $value['name']);
         }
         //内容
         $rowPosition = 2;   //定位行
-        foreach ($_SESSION['amount'] as $k => $v){
+        foreach ($showAmountArr as $k => $v){
             $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A'.$rowPosition, $k);
             $amountPosition = 0;    //定位列
             foreach ($v as $k_amount => $v_amount){
 
-                $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$amountPosition].$rowPosition, $v_amount);
+                $objPHPExcel->setActiveSheetIndex(0)->setCellValue($tableHead[$amountPosition].$rowPosition, $v_amount);
                 $amountPosition ++;
             }
             $rowPosition ++;
         }
 
     }else if($statu == 2){
+        $needWay = json_decode($_COOKIE['needWay']);
+        $needTime = json_decode($_COOKIE['needTime']);
+        //展示数据
+        $showList = [];
+        foreach ($needTime as $k_nt=>$v_nt){
+            $rowShow = [];
+            $rowShow[] = $v_nt;
+            if($k_nt < count($showAmountArr)){
+                foreach ($needWay as $k_nw=>$v_nw){
+                    $rowShow[] = $showAmountArr[$v_nt][$v_nw];
+                }
+            }
+
+            $showList[] = $rowShow;
+        }
         $title = "按需导出详情";
         //表头
         $objPHPExcel->setActiveSheetIndex(0)->setCellValue('A1', '日期');
@@ -62,7 +68,7 @@
             if($value == ""){
                 $value = "ios";
             }
-            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$key].'1', $value);
+            $objPHPExcel->setActiveSheetIndex(0)->setCellValue($tableHead[$key].'1', $value);
         }
 
         //内容
@@ -75,7 +81,7 @@
                 }else{
                     $num = (int)$k_c - 1;
 
-                    $objPHPExcel->setActiveSheetIndex(0)->setCellValue($_SESSION['tableHead'][$num].$rowPosition, $v_c);
+                    $objPHPExcel->setActiveSheetIndex(0)->setCellValue($tableHead[$num].$rowPosition, $v_c);
                 }
             }
             $rowPosition ++;
