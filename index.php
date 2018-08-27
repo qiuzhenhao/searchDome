@@ -1,9 +1,9 @@
 <?php
 
+    require ('model.php');
 
-    // 连接本地memcached
-    $memcache = new Memcache();
-    $memcache->connect('127.0.0.1',11211) or die('shit');
+    $memcache = dbLink::memcache();
+//    var_dump($memcache->get('sdUpdateTime'));exit;
     /**************************************************************
      * **********  变量表 **********
      * sdTimeList    设置存储时间的列表
@@ -21,11 +21,8 @@
      **************************************************************/
     $nowDate = time();
     if(!$memcache->get('sdUpdateTime') || $memcache->get('sdUpdateTime')+60*60 < $nowDate){
-        //连接数据库
-        $user = "root";
-        //$pass = "";
-        $pass = "123456";
-        $dbh = new PDO('mysql:host=localhost;dbname=testdb', $user, $pass,array(PDO::MYSQL_ATTR_INIT_COMMAND => "set names utf8"));
+
+        $dbh = dbLink::mysqlDb();
         // 获取时间
         $sqlTime = "select date_format(created,'%Y-%m-%d') AS time from app_channel GROUP BY time";
         $searchTime = $dbh->query($sqlTime);
@@ -343,11 +340,9 @@
                 //获取列表
                 getList: function(){
                     this.wayList = <?php echo $memcache->get('sdWayListJson')?>;
-                    console.log(this.wayList)
                     this.amountList = <?php echo $memcache->get('sdTimeAmountListJson')?>;
                     this.statu = 1;
                     this.nowDateFloat = "<?php echo $memcache->get('sdnowDate')?>";
-                    console.log(this.nowDateFloat);
 
                 },
                 //全选或者反选
@@ -437,11 +432,13 @@
                     var date=new Date();
                     //设置2S的过期时间
                     date.setTime(date.getTime()+2*1000);
+
                     //需要导出的渠道
                     document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
                     //需要导出的时间
                     document.cookie="needTime="+JSON.stringify(this.timeList)+"; expires="+date.toGMTString();
                     window.location = "export.php?statu=2";
+
                 },
 
             },
