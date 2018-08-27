@@ -437,6 +437,7 @@
                     document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
                     //需要导出的时间
                     document.cookie="needTime="+JSON.stringify(this.timeList)+"; expires="+date.toGMTString();
+        
                     window.location = "export.php?statu=2";
 
                 },
