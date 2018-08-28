@@ -3,7 +3,6 @@
     require ('model.php');
 
     $memcache = dbLink::memcache();
-//    var_dump($memcache->get('sdUpdateTime'));exit;
     /**************************************************************
      * **********  变量表 **********
      * sdTimeList    设置存储时间的列表
@@ -173,9 +172,15 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>search</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no" />
     <link rel="stylesheet" href="css/amazeui.min.css">
     <link rel="stylesheet" href="css/admin.css">
     <link rel="stylesheet" href="css/search.css">
+    <style>
+        .tableBackground{
+            background-color: #87CEEB;
+        }
+    </style>
 </head>
 <body>
     <div id="vueApp">
@@ -228,7 +233,7 @@
             </div>
             <div id="boxscrol2">
                 <table class="tableSetSelect" border="1" cellspacing="0">
-                    <tr>
+                    <tr style="color: #0e93d7">
                         <td>日期</td>
                         <td v-for="way in needSelectWay" v-text="way == ''?'ios':way"></td>
                     </tr>
@@ -332,6 +337,10 @@
                 showList:[],
                 //目前跟新到的日期
                 nowDateFloat:'',
+                //行定位
+                trPosition:-1,
+                //列定位
+                tdPosition:-1,
             },
             created: function(){
                 this.getList();
@@ -437,16 +446,58 @@
                     document.cookie="needWay="+JSON.stringify(this.needSelectWay)+"; expires="+date.toGMTString();
                     //需要导出的时间
                     document.cookie="needTime="+JSON.stringify(this.timeList)+"; expires="+date.toGMTString();
-        
+
                     window.location = "export.php?statu=2";
 
                 },
+                // 判断是否点击
+                tablePosition:function () {
+                    var $tb = $('.tableSetSelect');
+                    var $tr = $tb.find('tr');
+                    var $td = $tb.find('td');
+                    this.tdPosition = -1;
+                    this.trPosition = -1;
+                    $td.click(function(e){
+                        this.tdPosition = e.currentTarget.cellIndex;
+                    }.bind(this))
+                    $tr.click(function(e){
+                        this.trPosition = e.currentTarget.rowIndex;
+                        this.changeBackground();
+                    }.bind(this))
+                    $td.dblclick(function () {
+                        this.reBackground();
+                    }.bind(this))
+                },
+                // 执行点击改变背景颜色事件 (单击选择或取消,双击取消;  只有表头和列头才能选择)
+                changeBackground:function ($trPosition, $trPosition) {
+                    if(this.trPosition == 0 && this.tdPosition != 0){
+                        var $statu = $(".tableSetSelect tr").find("td:eq(" + this.tdPosition + ")").hasClass('tableBackground')
+                        if($statu){
+                            $(".tableSetSelect tr").find("td:eq(" + this.tdPosition + ")").removeClass('tableBackground');
+                        }else{
+                            $(".tableSetSelect tr").find("td:eq(" + this.tdPosition + ")").addClass('tableBackground');
+                        }
+                    }else if(this.tdPosition == 0 && this.trPosition != 0){
+                        var $statu = $(".tableSetSelect").find("tr:eq(" + this.trPosition + ")").hasClass('tableBackground')
+                        if($statu){
+                            $(".tableSetSelect").find("tr:eq(" + this.trPosition + ")").removeClass('tableBackground')
+                        }else{
+                            $(".tableSetSelect").find("tr:eq(" + this.trPosition + ")").addClass('tableBackground');
+                        }
+                    }
+                },
+                //移除背景颜色
+                reBackground:function () {
+                    $(".tableSetSelect").find("td").removeClass('tableBackground');
+                    $(".tableSetSelect").find("tr").removeClass('tableBackground');
+                }
 
             },
             watch: {
                 'statu':function () {
                     $('#my-start').datepicker();
                     $('#my-end').datepicker();
+                    this.tablePosition();
                 }
             }
         })
