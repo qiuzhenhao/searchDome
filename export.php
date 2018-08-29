@@ -8,9 +8,11 @@
 //        die('Connect Failed Message: ' . $e->getMessage());
 //    }
     // 连接本地memcached
-    $memcache = new Memcache();
-    $memcache->connect('127.0.0.1',11211) or die('shit');
+//    $memcache = new Memcache();
+//    $memcache->connect('127.0.0.1',11211) or die('shit');
 
+    require ('model.php');
+    $memcache = dbLink::memcache();
     $showAmountArr = json_decode($memcache->get('sdTimeAmountListJson'), true);
     $wayList = json_decode($memcache->get('sdWayListJson'), true);
     $tableHead = $memcache->get('sdTableHead');
